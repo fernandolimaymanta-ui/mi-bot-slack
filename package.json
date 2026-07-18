@@ -12,6 +12,8 @@
   "type": "commonjs",
   "dependencies": {
     "@slack/bolt": "^4.7.3",
-    "dotenv": "^17.4.2"
+    "axios": "^1.18.1",
+    "dotenv": "^17.4.2",
+    "tesseract.js": "^7.0.0"
   }
 }

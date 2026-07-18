@@ -22,6 +22,18 @@ app.message('hola', async ({ message, say }) => {
   console.log('⚡️ ¡El bot de Slack está en línea y escuchando!');
 })();
 
+// Servidor web falso (Dummy Server) para engañar a Render
+// Render requiere que todos los "Web Services" abran un puerto HTTP.
+// Como usamos Socket Mode, abrimos este puerto solo para que Render pase la validación.
+const http = require('http');
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('El bot de Slack está ejecutándose en Socket Mode.');
+}).listen(port, () => {
+  console.log(`Servidor HTTP de respaldo escuchando en el puerto ${port} para Render`);
+});
+
 // Escucha el comando /crear-tarea para abrir un modal
 app.command('/crear-tarea', async ({ command, ack, client, logger }) => {
   await ack();

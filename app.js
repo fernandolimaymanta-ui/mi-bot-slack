@@ -1027,4 +1027,147 @@ app.action(/b2b_(aprobar|rechazar|mas_datos)/, async ({ action, body, ack, clien
   } catch (error) {
     logger.error("Error manejando acción B2B:", error);
   }
+});
+
+// ==========================================
+// FLUJO: DEMO AGENTE DE IA (KANALIA)
+// ==========================================
+
+app.command('/kanalia', async ({ command, ack, respond, client, logger }) => {
+  await ack();
+
+  const pregunta = command.text.toLowerCase();
+  
+  if (!pregunta) {
+    await respond("👋 ¡Hola! Soy Kanalia AI. Puedes preguntarme sobre stock, proyecciones o riesgos operativos.");
+    return;
+  }
+
+  try {
+    // 1. Mensaje inicial simulando "Pensamiento"
+    const thinkingMessage = await client.chat.postMessage({
+      channel: command.channel_id,
+      text: `🪄 *Kanalia AI está analizando...* \n> _Consultando ERP y cruzando datos de demanda en tiempo real para: "${command.text}"_`
+    });
+
+    // 2. Simular un tiempo de procesamiento de 2.5 segundos
+    setTimeout(async () => {
+      let blocks = [];
+      let textResponse = "";
+
+      // ESCENARIO A: Consulta de Stock
+      if (pregunta.includes("stock") || pregunta.includes("carrara")) {
+        textResponse = "Reporte de Inventario: Porcelanato Carrara 60x60";
+        blocks = [
+          {
+            type: "header",
+            text: { type: "plain_text", text: "📊 Reporte de Inventario: Porcelanato Carrara 60x60", emoji: true }
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: "*🏢 Almacén Lima:*\n🟢 18,240 m²\n_(Saludable)_" },
+              { type: "mrkdwn", text: "*🏢 Almacén Trujillo:*\n🟡 2,890 m²\n_(Reposición: Viernes)_" }
+            ]
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: "*🏢 Almacén Arequipa:*\n🔴 4,320 m²\n_(Alerta de quiebre inminente)_" }
+            ]
+          },
+          {
+            type: "context",
+            elements: [
+              { type: "mrkdwn", text: "💡 *Insight AI:* El stock en Arequipa bajó un 15% más rápido de lo proyectado esta semana." }
+            ]
+          }
+        ];
+      }
+      // ESCENARIO B: Consulta de Riesgo de Quiebre
+      else if (pregunta.includes("riesgo") || pregunta.includes("quiebre")) {
+        textResponse = "Alerta de Riesgo de Quiebre Detectada";
+        blocks = [
+          {
+            type: "header",
+            text: { type: "plain_text", text: "⚠️ Análisis de Riesgo Predictivo", emoji: true }
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "He detectado una anomalía. Según el ritmo de ventas actual y las obras confirmadas de la Constructora ABC, **Arequipa sufrirá un quiebre de stock el día Jueves**."
+            }
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Solución Recomendada (AI):*\nTrasladar 2,000 m² de exceso desde Lima hacia Arequipa hoy mismo para cubrir la cuota de la semana."
+            }
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: { type: "plain_text", text: "🚚 Autorizar Traslado Lima -> Arequipa", emoji: true },
+                style: "primary",
+                action_id: "accion_traslado_kanalia"
+              }
+            ]
+          }
+        ];
+      }
+      // ESCENARIO C: Cualquier otra pregunta
+      else {
+        textResponse = "Respuesta de Kanalia AI";
+        blocks = [
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: `🤖 He analizado tu consulta sobre *"${command.text}"*.\nActualmente puedo ayudarte a consultar niveles de inventario específicos o predecir riesgos operativos. Intenta preguntarme: _"¿Cuánto stock tenemos de Carrara 60x60?"_` }
+          }
+        ];
+      }
+
+      // 3. Actualizar el mensaje original con la respuesta final
+      await client.chat.update({
+        channel: command.channel_id,
+        ts: thinkingMessage.ts,
+        text: textResponse,
+        blocks: blocks
+      });
+
+    }, 2500); // 2.5 segundos de delay
+
+  } catch (error) {
+    logger.error("Error en comando Kanalia:", error);
+  }
+});
+
+// 4. Manejador del botón de traslado
+app.action('accion_traslado_kanalia', async ({ body, ack, client, logger }) => {
+  await ack();
+  try {
+    // Actualizar el mensaje para mostrar éxito
+    await client.chat.update({
+      channel: body.channel.id,
+      ts: body.message.ts,
+      text: "Traslado en proceso",
+      blocks: [
+        body.message.blocks[0], // Header
+        body.message.blocks[1], // Contexto de riesgo
+        { type: "divider" },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "✅ *¡Ejecución Automática Exitosa!*\n> Orden de Traslado `#TR-9983` (2,000 m²) generada automáticamente en el ERP (SAP). \n> 🚛 El camión T-45 sale de Lima hoy a las 18:00 hrs. El gerente de logística ha sido notificado."
+          }
+        }
+      ]
+    });
+  } catch (error) {
+    logger.error("Error en botón de traslado:", error);
+  }
 });

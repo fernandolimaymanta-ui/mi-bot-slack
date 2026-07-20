@@ -587,4 +587,248 @@ app.event('file_shared', async ({ event, client, logger }) => {
   } catch (error) {
     logger.error("Error en el flujo de OCR a Canvas:", error);
   }
+});
+
+// ==========================================
+// FLUJO: REPORTE DE SINIESTROS / PROBLEMA PROTOCOLO
+// ==========================================
+
+// 1. Escuchar el mensaje detonante
+app.message(/problema protocolo/i, async ({ message, say, client, logger }) => {
+  try {
+    // Verificar si hay archivos adjuntos (la foto de la evidencia)
+    const hasFiles = message.files && message.files.length > 0;
+    
+    // Extraer menciones de usuarios (el supervisor)
+    // El texto podría ser: "Problema protocolo en ruta @supervisor"
+    let supervisorId = null;
+    const userMatch = message.text.match(/<@([a-zA-Z0-9]+)(\|.+)?>/);
+    if (userMatch) {
+      supervisorId = userMatch[1];
+    }
+
+    if (!supervisorId) {
+      await say({
+        text: `⚠️ <@${message.user}>, para reportar un problema de protocolo debes etiquetar a un supervisor (ejemplo: \`@Juan Perez\`).`,
+        thread_ts: message.ts
+      });
+      return;
+    }
+
+    if (!hasFiles) {
+      await say({
+        text: `⚠️ <@${message.user}>, recuerda adjuntar una foto de evidencia en el mensaje para el reporte de protocolo.`,
+        thread_ts: message.ts
+      });
+      return;
+    }
+
+    // Obtener la URL de la primera imagen
+    const fileUrl = message.files[0].url_private;
+    
+    // Guardar los datos temporalmente para pasarlos al modal
+    const metadata = JSON.stringify({
+      sup: supervisorId,
+      url: fileUrl,
+      msg_ts: message.ts,
+      channel: message.channel
+    });
+
+    // Enviar botón para abrir el formulario en un hilo
+    await say({
+      thread_ts: message.ts,
+      text: `Alerta de protocolo detectada. Por favor, llena el formulario de reporte.`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `🚨 *¡Alerta Detectada!*\n<@${message.user}>, haz clic en el botón para completar el formulario del siniestro. Se enviará directamente a <@${supervisorId}>.`
+          }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "📝 Llenar Reporte",
+                emoji: true
+              },
+              style: "danger",
+              action_id: "abrir_modal_siniestro",
+              value: metadata // Guardamos la info aquí para recuperarla al hacer clic
+            }
+          ]
+        }
+      ]
+    });
+
+  } catch (error) {
+    logger.error("Error en flujo de problema protocolo:", error);
+  }
+});
+
+// 2. Abrir el modal cuando hacen clic en el botón
+app.action('abrir_modal_siniestro', async ({ body, ack, client, logger }) => {
+  await ack();
+  
+  const metadata = body.actions[0].value;
+
+  try {
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'modal_siniestro',
+        private_metadata: metadata,
+        title: {
+          type: 'plain_text',
+          text: 'Reporte de Siniestro'
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Enviar Reporte'
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancelar'
+        },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'bloque_tipo',
+            element: {
+              type: 'static_select',
+              action_id: 'input_tipo',
+              placeholder: { type: 'plain_text', text: 'Selecciona el tipo de siniestro' },
+              options: [
+                { text: { type: 'plain_text', text: '🚨 Robo' }, value: 'Robo' },
+                { text: { type: 'plain_text', text: '💥 Accidente' }, value: 'Accidente' },
+                { text: { type: 'plain_text', text: '⚠️ Falla de Protocolo' }, value: 'Falla Protocolo' },
+                { text: { type: 'plain_text', text: '📦 Mercadería Dañada' }, value: 'Mercadería Dañada' }
+              ]
+            },
+            label: { type: 'plain_text', text: 'Tipo de Siniestro' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_partida',
+            element: { type: 'plain_text_input', action_id: 'input_partida' },
+            label: { type: 'plain_text', text: 'Lugar de Partida' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_destino',
+            element: { type: 'plain_text_input', action_id: 'input_destino' },
+            label: { type: 'plain_text', text: 'Lugar de Destino' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_detalles',
+            element: { type: 'plain_text_input', action_id: 'input_detalles', multiline: true },
+            label: { type: 'plain_text', text: 'Detalles del Siniestro / Situación inicial' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_productos',
+            element: { type: 'plain_text_input', action_id: 'input_productos', multiline: true },
+            label: { type: 'plain_text', text: 'Descripción de la entrega y productos' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_rep1',
+            element: { type: 'plain_text_input', action_id: 'input_rep1', placeholder: { type: 'plain_text', text: 'DNI y Nombres Completos' } },
+            label: { type: 'plain_text', text: 'Repartidor Principal' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_rep2',
+            optional: true,
+            element: { type: 'plain_text_input', action_id: 'input_rep2', placeholder: { type: 'plain_text', text: 'DNI y Nombres Completos' } },
+            label: { type: 'plain_text', text: 'Segundo Repartidor (Opcional)' }
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error("Error abriendo el modal de siniestro:", error);
+  }
+});
+
+// 3. Manejar el envío del modal y enviar DM al supervisor
+app.view('modal_siniestro', async ({ ack, body, view, client, logger }) => {
+  await ack();
+
+  try {
+    const values = view.state.values;
+    const tipo = values.bloque_tipo.input_tipo.selected_option.value;
+    const partida = values.bloque_partida.input_partida.value;
+    const destino = values.bloque_destino.input_destino.value;
+    const detalles = values.bloque_detalles.input_detalles.value;
+    const productos = values.bloque_productos.input_productos.value;
+    const rep1 = values.bloque_rep1.input_rep1.value;
+    const rep2 = values.bloque_rep2.input_rep2 ? values.bloque_rep2.input_rep2.value : 'No asignado';
+    
+    // Recuperar metadata guardada
+    const meta = JSON.parse(view.private_metadata);
+    const reporterId = body.user.id;
+
+    // Crear un link al mensaje original en el canal
+    let permalink = "";
+    try {
+      const linkRes = await client.chat.getPermalink({ channel: meta.channel, message_ts: meta.msg_ts });
+      if (linkRes.ok) permalink = linkRes.permalink;
+    } catch (e) {
+      // Ignore
+    }
+
+    // Mensaje para el supervisor (DM)
+    await client.chat.postMessage({
+      channel: meta.sup,
+      text: `🚨 Nuevo Reporte de Siniestro de <@${reporterId}>`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: `🚨 Reporte de Siniestro: ${tipo}`, emoji: true }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Reportado por:* <@${reporterId}>\n*Mensaje Original:* <${permalink}|Ver en el canal> (o <${meta.url}|ver foto adjunta>)`
+          }
+        },
+        { type: "divider" },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*📍 Partida:*\n${partida}` },
+            { type: "mrkdwn", text: `*🏁 Destino:*\n${destino}` },
+            { type: "mrkdwn", text: `*👤 Repartidor 1:*\n${rep1}` },
+            { type: "mrkdwn", text: `*👥 Repartidor 2:*\n${rep2 || 'No asignado'}` }
+          ]
+        },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: `*📝 Detalles de lo ocurrido:*\n> ${detalles}` }
+        },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: `*📦 Productos involucrados:*\n> ${productos}` }
+        }
+      ]
+    });
+
+    // Confirmar al repartidor en el hilo original
+    await client.chat.postMessage({
+      channel: meta.channel,
+      thread_ts: meta.msg_ts,
+      text: `✅ <@${reporterId}> tu reporte de siniestro ha sido enviado exitosamente a <@${meta.sup}>.`
+    });
+
+  } catch (error) {
+    logger.error("Error procesando modal de siniestro:", error);
+  }
 });

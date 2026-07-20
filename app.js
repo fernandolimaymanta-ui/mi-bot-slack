@@ -831,4 +831,200 @@ app.view('modal_siniestro', async ({ ack, body, view, client, logger }) => {
   } catch (error) {
     logger.error("Error procesando modal de siniestro:", error);
   }
+});
+
+// ==========================================
+// FLUJO B2B: APROBACIÓN DE DESCUENTOS Y CRÉDITOS
+// ==========================================
+
+// 1. Comando para abrir el modal de solicitud
+app.command('/solicitar-descuento', async ({ command, ack, client, logger }) => {
+  await ack();
+  try {
+    await client.views.open({
+      trigger_id: command.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'modal_b2b_descuento',
+        title: { type: 'plain_text', text: 'Solicitud de Descuento' },
+        submit: { type: 'plain_text', text: 'Enviar al Gerente' },
+        close: { type: 'plain_text', text: 'Cancelar' },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'bloque_cliente',
+            element: { type: 'plain_text_input', action_id: 'input_cliente', placeholder: { type: 'plain_text', text: 'Constructora XYZ S.A.C.' } },
+            label: { type: 'plain_text', text: 'Cliente' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_pedido',
+            element: { type: 'plain_text_input', action_id: 'input_pedido', placeholder: { type: 'plain_text', text: 'Ej: 5,000 m2 o S/ 150,000' } },
+            label: { type: 'plain_text', text: 'Volumen o Monto del Pedido' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_descuento',
+            element: { type: 'plain_text_input', action_id: 'input_descuento', placeholder: { type: 'plain_text', text: 'Ej: 8%' } },
+            label: { type: 'plain_text', text: 'Descuento Adicional Solicitado' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_justificacion',
+            element: { type: 'plain_text_input', action_id: 'input_justificacion', multiline: true, placeholder: { type: 'plain_text', text: 'Igualar oferta de la competencia...' } },
+            label: { type: 'plain_text', text: 'Justificación Estratégica' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_gerente',
+            element: {
+              type: 'users_select',
+              action_id: 'input_gerente',
+              placeholder: { type: 'plain_text', text: 'Selecciona al Gerente Comercial' }
+            },
+            label: { type: 'plain_text', text: 'Enviar aprobación a' }
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error("Error abriendo modal de descuento:", error);
+  }
+});
+
+// 2. Procesar el formulario y enviar la tarjeta interactiva al gerente
+app.view('modal_b2b_descuento', async ({ ack, body, view, client, logger }) => {
+  await ack();
+  try {
+    const values = view.state.values;
+    const cliente = values.bloque_cliente.input_cliente.value;
+    const pedido = values.bloque_pedido.input_pedido.value;
+    const descuento = values.bloque_descuento.input_descuento.value;
+    const justificacion = values.bloque_justificacion.input_justificacion.value;
+    const gerenteId = values.bloque_gerente.input_gerente.selected_user;
+    
+    const vendedorId = body.user.id;
+
+    // Generamos un string con los datos en formato JSON para pasarlo a los botones
+    const requestData = JSON.stringify({
+      vendedor: vendedorId,
+      cliente: cliente,
+      pedido: pedido,
+      descuento: descuento
+    });
+
+    // Enviar DM al gerente
+    await client.chat.postMessage({
+      channel: gerenteId,
+      text: `🚨 Tienes una nueva solicitud de descuento B2B de <@${vendedorId}>`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: `💸 Solicitud de Descuento B2B`, emoji: true }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Vendedor:* <@${vendedorId}>\n*Cliente:* ${cliente}\n*Pedido:* ${pedido}\n*Descuento Solicitado:* ${descuento}\n\n*Justificación:*\n> ${justificacion}`
+          }
+        },
+        { type: "divider" },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "✅ Aprobar", emoji: true },
+              style: "primary",
+              action_id: "b2b_aprobar",
+              value: requestData
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "❌ Rechazar", emoji: true },
+              style: "danger",
+              action_id: "b2b_rechazar",
+              value: requestData
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "💬 Pedir más datos", emoji: true },
+              action_id: "b2b_mas_datos",
+              value: requestData
+            }
+          ]
+        }
+      ]
+    });
+
+    // Avisar al vendedor (opcional, como un DM automatizado)
+    await client.chat.postMessage({
+      channel: vendedorId,
+      text: `✅ Tu solicitud de descuento para *${cliente}* ha sido enviada a <@${gerenteId}> para su revisión.`
+    });
+
+  } catch (error) {
+    logger.error("Error enviando reporte B2B:", error);
+  }
+});
+
+// 3. Manejar las acciones de los botones del gerente
+app.action(/b2b_(aprobar|rechazar|mas_datos)/, async ({ action, body, ack, client, logger }) => {
+  await ack();
+  try {
+    const decisionType = action.action_id; // 'b2b_aprobar', 'b2b_rechazar' o 'b2b_mas_datos'
+    const requestData = JSON.parse(action.value);
+    const gerenteId = body.user.id;
+
+    // Actualizar el mensaje del gerente para que los botones desaparezcan
+    let nuevoTexto = "";
+    let colorTexto = "";
+    if (decisionType === 'b2b_aprobar') {
+      nuevoTexto = "✅ *Aprobaste* esta solicitud.";
+      colorTexto = "🟢";
+    } else if (decisionType === 'b2b_rechazar') {
+      nuevoTexto = "❌ *Rechazaste* esta solicitud.";
+      colorTexto = "🔴";
+    } else {
+      nuevoTexto = "💬 *Pediste más datos* (te pondrás en contacto con el vendedor).";
+      colorTexto = "🟡";
+    }
+
+    await client.chat.update({
+      channel: body.channel.id,
+      ts: body.message.ts,
+      text: `Solicitud procesada: ${nuevoTexto}`,
+      blocks: [
+        body.message.blocks[0], // Header
+        body.message.blocks[1], // Detalles
+        { type: "divider" },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `${colorTexto} ${nuevoTexto} (Se ha notificado al vendedor)`
+          }
+        }
+      ]
+    });
+
+    // Notificar al vendedor
+    let notificacionVendedor = "";
+    if (decisionType === 'b2b_aprobar') {
+      notificacionVendedor = `🎉 *¡Aprobado!* <@${gerenteId}> aprobó el descuento de *${requestData.descuento}* para *${requestData.cliente}*. (Simulación: Integración con ERP activada y pedido actualizado).`;
+    } else if (decisionType === 'b2b_rechazar') {
+      notificacionVendedor = `❌ *Rechazado.* <@${gerenteId}> rechazó la solicitud para *${requestData.cliente}*.`;
+    } else {
+      notificacionVendedor = `⚠️ *Revisión pendiente.* <@${gerenteId}> necesita más datos para evaluar el caso de *${requestData.cliente}*. Te contactará en breve.`;
+    }
+
+    await client.chat.postMessage({
+      channel: requestData.vendedor,
+      text: notificacionVendedor
+    });
+
+  } catch (error) {
+    logger.error("Error manejando acción B2B:", error);
+  }
 });

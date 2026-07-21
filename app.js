@@ -1030,16 +1030,16 @@ app.action(/b2b_(aprobar|rechazar|mas_datos)/, async ({ action, body, ack, clien
 });
 
 // ==========================================
-// FLUJO: DEMO AGENTE DE IA (KANALIA)
+// FLUJO: DEMO AGENTE DE IA (CELIMA BOT)
 // ==========================================
 
-app.command('/kanalia', async ({ command, ack, respond, client, logger }) => {
+app.command('/celima-bot', async ({ command, ack, respond, client, logger }) => {
   await ack();
 
-  const pregunta = command.text.toLowerCase();
+  const pregunta = command.text.trim().toLowerCase();
   
-  if (!pregunta) {
-    await respond("👋 ¡Hola! Soy Kanalia AI. Puedes preguntarme sobre stock, proyecciones o riesgos operativos.");
+  if (!pregunta || pregunta === 'iniciar') {
+    await respond("👋 ¡Hola! Soy Celima Bot. Puedes preguntarme sobre stock, proyecciones o riesgos operativos.");
     return;
   }
 
@@ -1047,7 +1047,7 @@ app.command('/kanalia', async ({ command, ack, respond, client, logger }) => {
     // 1. Mensaje inicial simulando "Pensamiento"
     const thinkingMessage = await client.chat.postMessage({
       channel: command.channel_id,
-      text: `🪄 *Kanalia AI está analizando...* \n> _Consultando ERP y cruzando datos de demanda en tiempo real para: "${command.text}"_`
+      text: `🪄 *Celima Bot está analizando...* \n> _Consultando ERP y cruzando datos de demanda en tiempo real para: "${command.text}"_`
     });
 
     // 2. Simular un tiempo de procesamiento de 2.5 segundos
@@ -1121,7 +1121,7 @@ app.command('/kanalia', async ({ command, ack, respond, client, logger }) => {
       }
       // ESCENARIO C: Cualquier otra pregunta
       else {
-        textResponse = "Respuesta de Kanalia AI";
+        textResponse = "Respuesta de Celima Bot";
         blocks = [
           {
             type: "section",
@@ -1141,7 +1141,7 @@ app.command('/kanalia', async ({ command, ack, respond, client, logger }) => {
     }, 2500); // 2.5 segundos de delay
 
   } catch (error) {
-    logger.error("Error en comando Kanalia:", error);
+    logger.error("Error en comando Celima Bot:", error);
   }
 });
 

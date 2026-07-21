@@ -1170,4 +1170,149 @@ app.action('accion_traslado_kanalia', async ({ body, ack, client, logger }) => {
   } catch (error) {
     logger.error("Error en botón de traslado:", error);
   }
+});
+
+// ==========================================
+// FLUJO: ALERTAS DE CADENA DE SUMINISTRO Y PRODUCCIÓN
+// ==========================================
+
+// 1. Comando simulador de SAP/IoT
+app.command('/simular-alerta-sap', async ({ command, ack, client, logger }) => {
+  await ack();
+  try {
+    await client.chat.postMessage({
+      channel: command.channel_id,
+      text: "🚨 ALERTA CRÍTICA: Parada de Máquina",
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "🚨 ALERTA SAP/IoT: Parada de Máquina", emoji: true }
+        },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: "*Línea de Producción:*\nExtrusión 04" },
+            { type: "mrkdwn", text: "*Tiempo de inactividad:*\n00:03:12 (En aumento)" },
+            { type: "mrkdwn", text: "*Impacto Financiero:*\n📉 -$1,200 / hora" },
+            { type: "mrkdwn", text: "*Diagnóstico IoT:*\n⚠️ Caída de presión hidráulica (Sensor H-42)" }
+          ]
+        },
+        { type: "divider" },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "La línea se encuentra detenida. Requiere atención inmediata por mantenimiento." }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "🔧 Asumir Incidencia", emoji: true },
+              style: "primary",
+              action_id: "asumir_incidencia_planta"
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "📦 Pedir Repuesto", emoji: true },
+              action_id: "pedir_repuesto_planta"
+            }
+          ]
+        }
+      ]
+    });
+  } catch (error) {
+    logger.error("Error simulando alerta SAP:", error);
+  }
+});
+
+// 2. Acción: Asumir Incidencia
+app.action('asumir_incidencia_planta', async ({ body, ack, client, logger }) => {
+  await ack();
+  try {
+    const userId = body.user.id;
+    // Quitamos los botones y mostramos quién asumió la incidencia
+    await client.chat.update({
+      channel: body.channel.id,
+      ts: body.message.ts,
+      text: "Incidencia asumida",
+      blocks: [
+        body.message.blocks[0], // Header
+        body.message.blocks[1], // Detalles
+        { type: "divider" },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `✅ *En Atención:* El ingeniero <@${userId}> ha asumido esta incidencia y se encuentra en camino a la Máquina de Extrusión 04.`
+          }
+        }
+      ]
+    });
+  } catch (error) {
+    logger.error("Error asumiendo incidencia de planta:", error);
+  }
+});
+
+// 3. Acción: Pedir Repuesto (Abre Modal)
+app.action('pedir_repuesto_planta', async ({ body, ack, client, logger }) => {
+  await ack();
+  try {
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'modal_repuesto_planta',
+        private_metadata: JSON.stringify({ channel: body.channel.id, ts: body.message.ts }),
+        title: { type: 'plain_text', text: 'Solicitud a Almacén' },
+        submit: { type: 'plain_text', text: 'Solicitar Pieza' },
+        close: { type: 'plain_text', text: 'Cancelar' },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'bloque_codigo',
+            element: { type: 'plain_text_input', action_id: 'input_codigo', placeholder: { type: 'plain_text', text: 'Ej: Válvula Hidráulica V-700' } },
+            label: { type: 'plain_text', text: 'Código o Nombre del Repuesto' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_urgencia',
+            element: {
+              type: 'static_select',
+              action_id: 'input_urgencia',
+              placeholder: { type: 'plain_text', text: 'Seleccionar nivel' },
+              options: [
+                { text: { type: 'plain_text', text: '🚨 Crítica (Línea Parada)' }, value: 'critica' },
+                { text: { type: 'plain_text', text: '🟡 Media (Mantenimiento)' }, value: 'media' }
+              ]
+            },
+            label: { type: 'plain_text', text: 'Nivel de Urgencia' }
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error("Error abriendo modal de repuesto:", error);
+  }
+});
+
+// 4. Manejar el envío del Modal de Repuesto
+app.view('modal_repuesto_planta', async ({ ack, body, view, client, logger }) => {
+  await ack();
+  try {
+    const values = view.state.values;
+    const repuesto = values.bloque_codigo.input_codigo.value;
+    const urgencia = values.bloque_urgencia.input_urgencia.selected_option.value;
+    const userId = body.user.id;
+    const meta = JSON.parse(view.private_metadata);
+
+    // Responder en el hilo del mensaje de alerta original
+    await client.chat.postMessage({
+      channel: meta.channel,
+      thread_ts: meta.ts,
+      text: `📦 *Solicitud a Almacén generada por <@${userId}>:*\nSe ha solicitado la pieza: *${repuesto}*.\nEstado del almacén: _Procesando despacho urgente hacia Extrusión 04._`
+    });
+
+  } catch (error) {
+    logger.error("Error procesando modal de repuesto:", error);
+  }
 });

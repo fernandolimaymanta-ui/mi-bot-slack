@@ -1315,4 +1315,150 @@ app.view('modal_repuesto_planta', async ({ ack, body, view, client, logger }) =>
   } catch (error) {
     logger.error("Error procesando modal de repuesto:", error);
   }
+});
+
+// ==========================================
+// FLUJO: PREDICCIÓN DE FUGA B2B (AJINOMOTO / KAM)
+// ==========================================
+
+// 1. Comando para simular la alerta predictiva de churn
+app.command('/simular-alerta-fuga', async ({ command, ack, client, logger }) => {
+  await ack();
+  try {
+    await client.chat.postMessage({
+      channel: command.channel_id,
+      text: "📉 Alerta Predictiva de Fuga (Churn Model)",
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "🤖 Alerta Predictiva (Modelo de Churn)", emoji: true }
+        },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: "*Distribuidor:*\nMayorista 'El Norteño' (Cono Norte)" },
+            { type: "mrkdwn", text: "*Categoría de Riesgo:*\n🔴 ALTO (82% prob. de fuga)" }
+          ]
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "*Análisis de la IA:*\nEl cliente ha bajado sus pedidos de _Aji-no-men_ en un **15%** durante el último mes, mientras que sus compras de la competencia (marca X) han aumentado en esa misma zona geográfica. \n\n*Sugerencia del sistema:* Intervención comercial inmediata."
+          }
+        },
+        { type: "divider" },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "📅 Programar Visita Urgente", emoji: true },
+              style: "primary",
+              action_id: "programar_visita_kam"
+            },
+            {
+              type: "button",
+              text: { type: "plain_text", text: "🎁 Aplicar Bono de Retención", emoji: true },
+              action_id: "bono_fidelizacion_kam"
+            }
+          ]
+        }
+      ]
+    });
+  } catch (error) {
+    logger.error("Error simulando alerta de fuga:", error);
+  }
+});
+
+// 2. Acción: Programar Visita (Abre Modal)
+app.action('programar_visita_kam', async ({ body, ack, client, logger }) => {
+  await ack();
+  try {
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'modal_visita_kam',
+        private_metadata: JSON.stringify({ channel: body.channel.id, ts: body.message.ts }),
+        title: { type: 'plain_text', text: 'Programar Visita B2B' },
+        submit: { type: 'plain_text', text: 'Agendar en CRM' },
+        close: { type: 'plain_text', text: 'Cancelar' },
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'Agendando visita presencial para *Mayorista El Norteño*.' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_fecha_visita',
+            element: {
+              type: 'datepicker',
+              initial_date: new Date().toISOString().split('T')[0],
+              action_id: 'input_fecha_visita'
+            },
+            label: { type: 'plain_text', text: 'Fecha de la visita' }
+          },
+          {
+            type: 'input',
+            block_id: 'bloque_objetivo',
+            element: { type: 'plain_text_input', action_id: 'input_objetivo', multiline: true, placeholder: { type: 'plain_text', text: 'Ej: Presentar nueva oferta de volumen y entender motivo de la baja...' } },
+            label: { type: 'plain_text', text: 'Objetivo de la reunión' }
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error("Error abriendo modal de visita:", error);
+  }
+});
+
+// 3. Manejar el envío del Modal de Visita
+app.view('modal_visita_kam', async ({ ack, body, view, client, logger }) => {
+  await ack();
+  try {
+    const values = view.state.values;
+    const fecha = values.bloque_fecha_visita.input_fecha_visita.selected_date;
+    const objetivo = values.bloque_objetivo.input_objetivo.value;
+    const userId = body.user.id;
+    const meta = JSON.parse(view.private_metadata);
+
+    // Responder en el canal original (o en un hilo)
+    await client.chat.postMessage({
+      channel: meta.channel,
+      thread_ts: meta.ts,
+      text: `✅ *CRM Actualizado por <@${userId}>:*\nSe ha agendado una visita a *El Norteño* para el *${fecha}*.\n*Objetivo:* ${objetivo}`
+    });
+
+  } catch (error) {
+    logger.error("Error procesando modal de visita:", error);
+  }
+});
+
+// 4. Acción: Aplicar Bono de Fidelización
+app.action('bono_fidelizacion_kam', async ({ body, ack, client, logger }) => {
+  await ack();
+  try {
+    // Actualizar el mensaje para mostrar el éxito de la acción
+    await client.chat.update({
+      channel: body.channel.id,
+      ts: body.message.ts,
+      text: "Incentivo aplicado",
+      blocks: [
+        body.message.blocks[0], // Header
+        body.message.blocks[1], // Campos
+        body.message.blocks[2], // Análisis AI
+        { type: "divider" },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `🎁 *Acción Inmediata:* <@${body.user.id}> ha autorizado un *Descuento Especial de Retención (5%)* para el próximo pedido en SAP. Notificación automática enviada al cliente.`
+          }
+        }
+      ]
+    });
+  } catch (error) {
+    logger.error("Error aplicando bono de retención:", error);
+  }
 });

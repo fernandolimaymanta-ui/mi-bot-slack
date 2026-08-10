@@ -123,12 +123,13 @@ app.view('modal_crear_tarea', async ({ ack, body, view, client, logger }) => {
 // FLUJO: APROBACIONES QROMA (SALESFORCE)
 // ==========================================
 
-async function iniciarAprobacionComercial(payload) {
+async function iniciarAprobacionComercial(payload, client, respond) {
   // payload esperado: { cliente, solicitud, impacto, justificacion, fechaLimite, ejecutivoId, aprobadorId, canalNotificacion }
   const canal = payload.canalNotificacion || process.env.CANAL_APROBACIONES || payload.ejecutivoId; 
   
   try {
-    const result = await app.client.chat.postMessage({
+    const chatClient = client || app.client;
+    const result = await chatClient.chat.postMessage({
       channel: canal,
       text: `Nueva Solicitud de Aprobación QROMA: ${payload.cliente}`,
       blocks: [
@@ -191,7 +192,7 @@ async function iniciarAprobacionComercial(payload) {
     const messageTs = result.ts;
     setTimeout(async () => {
       try {
-        await app.client.chat.postMessage({
+        await chatClient.chat.postMessage({
           channel: canal,
           thread_ts: messageTs,
           text: `⚠️ *Atención:* La solicitud de ${payload.cliente} no ha sido respondida en el tiempo definido. Escalando al siguiente nivel...`
@@ -203,10 +204,13 @@ async function iniciarAprobacionComercial(payload) {
 
   } catch (error) {
     console.error("Error publicando aprobación comercial:", error);
+    if (respond) {
+      await respond(`⚠️ *Error publicando la tarjeta:* ${error.message}\n_Asegúrate de que el bot esté invitado al canal (escribe \`@mibot\` para invitarlo)._`);
+    }
   }
 }
 
-app.command('/simular-aprobacion', async ({ command, ack, respond }) => {
+app.command('/simular-aprobacion', async ({ command, ack, respond, client }) => {
   await ack();
   
   const text = command.text.trim();
@@ -229,7 +233,7 @@ app.command('/simular-aprobacion', async ({ command, ack, respond }) => {
   };
 
   await respond("Generando simulación de aprobación QROMA en el canal...");
-  await iniciarAprobacionComercial(payloadSimulado);
+  await iniciarAprobacionComercial(payloadSimulado, client, respond);
 });
 
 app.action(/btn_(aprobar|rechazar|info)_comercial/, async ({ ack, body, action, client, logger }) => {

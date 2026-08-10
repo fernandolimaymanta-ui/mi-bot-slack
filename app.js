@@ -206,34 +206,125 @@ async function iniciarAprobacionComercial(payload, client, respond) {
     console.error("Error publicando aprobación comercial:", error);
     if (respond) {
       await respond(`⚠️ *Error publicando la tarjeta:* ${error.message}\n_Asegúrate de que el bot esté invitado al canal (escribe \`@mibot\` para invitarlo)._`);
+    } else {
+      try {
+        const chatClient = client || app.client;
+        await chatClient.chat.postMessage({
+          channel: payload.ejecutivoId,
+          text: `⚠️ *Error publicando la tarjeta en el canal seleccionado:* ${error.message}\n_Asegúrate de que el bot esté invitado a ese canal._`
+        });
+      } catch (e) {
+        console.error("No se pudo notificar el error al usuario", e);
+      }
     }
   }
 }
 
-app.command('/simular-aprobacion', async ({ command, ack, respond, client }) => {
+app.command('/simular-aprobacion', async ({ command, ack, client, logger }) => {
   await ack();
-  
-  const text = command.text.trim();
-  let aprobadorId = command.user_id; 
-  
-  const userMatch = text.match(/<@([a-zA-Z0-9]+)(\|.+)?>/);
-  if (userMatch) {
-    aprobadorId = userMatch[1];
+
+  try {
+    await client.views.open({
+      trigger_id: command.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'modal_crear_simulacion',
+        title: {
+          type: 'plain_text',
+          text: 'Simular Solicitud QROMA'
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Generar'
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancelar'
+        },
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "Rellena los datos para crear una *solicitud de prueba*."
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'b_cliente',
+            element: { type: 'plain_text_input', action_id: 'i_cliente', placeholder: { type: 'plain_text', text: 'Ej: ABC S.A.' } },
+            label: { type: 'plain_text', text: 'Cliente' }
+          },
+          {
+            type: 'input',
+            block_id: 'b_solicitud',
+            element: { type: 'plain_text_input', action_id: 'i_solicitud', placeholder: { type: 'plain_text', text: 'Ej: Descuento adicional del 8%' } },
+            label: { type: 'plain_text', text: 'Solicitud' }
+          },
+          {
+            type: 'input',
+            block_id: 'b_impacto',
+            element: { type: 'plain_text_input', action_id: 'i_impacto', placeholder: { type: 'plain_text', text: 'Ej: S/ 12,000' } },
+            label: { type: 'plain_text', text: 'Impacto Estimado' }
+          },
+          {
+            type: 'input',
+            block_id: 'b_justificacion',
+            element: { type: 'plain_text_input', action_id: 'i_justificacion', multiline: true, placeholder: { type: 'plain_text', text: 'Motivo de la solicitud...' } },
+            label: { type: 'plain_text', text: 'Justificación' }
+          },
+          {
+            type: 'input',
+            block_id: 'b_fecha',
+            element: { type: 'plain_text_input', action_id: 'i_fecha', placeholder: { type: 'plain_text', text: 'Ej: Hoy, 4 p.m.' } },
+            label: { type: 'plain_text', text: 'Fecha Límite' }
+          },
+          {
+            type: 'input',
+            block_id: 'b_aprobador',
+            element: { type: 'users_select', action_id: 'i_aprobador', placeholder: { type: 'plain_text', text: 'Selecciona al aprobador' } },
+            label: { type: 'plain_text', text: 'Aprobador Asignado' }
+          },
+          {
+            type: 'input',
+            block_id: 'b_canal',
+            element: { 
+              type: 'conversations_select', 
+              action_id: 'i_canal', 
+              initial_conversation: command.channel_id,
+              filter: { include: ['public', 'private'] }
+            },
+            label: { type: 'plain_text', text: 'Canal de Notificación' }
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error("Error abriendo modal de simulación:", error);
   }
+});
 
-  const payloadSimulado = {
-    cliente: "ABC S.A.",
-    solicitud: "Descuento adicional de 8%",
-    impacto: "S/ 12,000",
-    justificacion: "Renovación de contrato",
-    fechaLimite: "Hoy, 4 p.m.",
-    ejecutivoId: command.user_id,
-    aprobadorId: aprobadorId,
-    canalNotificacion: command.channel_id
-  };
+app.view('modal_crear_simulacion', async ({ ack, body, view, client, logger }) => {
+  await ack();
 
-  await respond("Generando simulación de aprobación QROMA en el canal...");
-  await iniciarAprobacionComercial(payloadSimulado, client, respond);
+  try {
+    const vals = view.state.values;
+    const payloadSimulado = {
+      cliente: vals.b_cliente.i_cliente.value,
+      solicitud: vals.b_solicitud.i_solicitud.value,
+      impacto: vals.b_impacto.i_impacto.value,
+      justificacion: vals.b_justificacion.i_justificacion.value,
+      fechaLimite: vals.b_fecha.i_fecha.value,
+      aprobadorId: vals.b_aprobador.i_aprobador.selected_user,
+      canalNotificacion: vals.b_canal.i_canal.selected_conversation,
+      ejecutivoId: body.user.id
+    };
+
+    await iniciarAprobacionComercial(payloadSimulado, client, undefined);
+    
+  } catch (error) {
+    logger.error("Error procesando modal de simulación:", error);
+  }
 });
 
 app.action(/btn_(aprobar|rechazar|info)_comercial/, async ({ ack, body, action, client, logger }) => {

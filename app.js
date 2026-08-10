@@ -124,8 +124,8 @@ app.view('modal_crear_tarea', async ({ ack, body, view, client, logger }) => {
 // ==========================================
 
 async function iniciarAprobacionComercial(payload, client, respond) {
-  // payload esperado: { cliente, solicitud, impacto, justificacion, fechaLimite, ejecutivoId, aprobadorId, canalNotificacion }
-  const canal = payload.canalNotificacion || process.env.CANAL_APROBACIONES || payload.ejecutivoId; 
+  // payload esperado: { cliente, solicitud, impacto, justificacion, fechaLimite, ejecutivoId, aprobadorId }
+  const canal = payload.aprobadorId; 
   
   try {
     const chatClient = client || app.client;
@@ -211,7 +211,7 @@ async function iniciarAprobacionComercial(payload, client, respond) {
         const chatClient = client || app.client;
         await chatClient.chat.postMessage({
           channel: payload.ejecutivoId,
-          text: `⚠️ *Error publicando la tarjeta en el canal seleccionado:* ${error.message}\n_Asegúrate de que el bot esté invitado a ese canal._`
+          text: `⚠️ *Error enviando la tarjeta por interno:* ${error.message}\n_Asegúrate de que el usuario exista o el bot pueda enviarle DMs._`
         });
       } catch (e) {
         console.error("No se pudo notificar el error al usuario", e);
@@ -284,17 +284,6 @@ app.command('/simular-aprobacion', async ({ command, ack, client, logger }) => {
             block_id: 'b_aprobador',
             element: { type: 'users_select', action_id: 'i_aprobador', placeholder: { type: 'plain_text', text: 'Selecciona al aprobador' } },
             label: { type: 'plain_text', text: 'Aprobador Asignado' }
-          },
-          {
-            type: 'input',
-            block_id: 'b_canal',
-            element: { 
-              type: 'conversations_select', 
-              action_id: 'i_canal', 
-              initial_conversation: command.channel_id,
-              filter: { include: ['public', 'private'] }
-            },
-            label: { type: 'plain_text', text: 'Canal de Notificación' }
           }
         ]
       }
@@ -316,7 +305,6 @@ app.view('modal_crear_simulacion', async ({ ack, body, view, client, logger }) =
       justificacion: vals.b_justificacion.i_justificacion.value,
       fechaLimite: vals.b_fecha.i_fecha.value,
       aprobadorId: vals.b_aprobador.i_aprobador.selected_user,
-      canalNotificacion: vals.b_canal.i_canal.selected_conversation,
       ejecutivoId: body.user.id
     };
 

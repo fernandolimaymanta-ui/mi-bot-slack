@@ -28,10 +28,30 @@ app.message('hola', async ({ message, say }) => {
 const http = require('http');
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('El bot de Slack está ejecutándose en Socket Mode.');
+  if (req.method === 'POST' && req.url === '/webhook/salesforce/aprobacion') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        // Despachar el flujo de aprobación comercial
+        await iniciarAprobacionComercial(payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+      } catch (error) {
+        console.error("Error parseando webhook:", error);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+      }
+    });
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('El bot de Slack está ejecutándose en Socket Mode.');
+  }
 }).listen(port, () => {
-  console.log(`Servidor HTTP de respaldo escuchando en el puerto ${port} para Render`);
+  console.log(`Servidor HTTP de respaldo escuchando en el puerto ${port} para Render (y Webhooks)`);
 });
 
 // Escucha el comando /crear-tarea para abrir un modal
@@ -98,6 +118,260 @@ app.view('modal_crear_tarea', async ({ ack, body, view, client, logger }) => {
 });
 
 // ... (tu configuración inicial y app.message quedan arriba) ...
+
+// ==========================================
+// FLUJO: APROBACIONES COMERCIALES (SALESFORCE)
+// ==========================================
+
+async function iniciarAprobacionComercial(payload) {
+  // payload esperado: { cliente, solicitud, impacto, justificacion, fechaLimite, ejecutivoId, aprobadorId, canalNotificacion }
+  const canal = payload.canalNotificacion || process.env.CANAL_APROBACIONES || payload.ejecutivoId; 
+  
+  try {
+    const result = await app.client.chat.postMessage({
+      channel: canal,
+      text: `Nueva Solicitud de Aprobación Comercial: ${payload.cliente}`,
+      blocks: [
+        {
+          type: "header",
+          text: {
+            type: "plain_text",
+            text: "Aprobación Comercial Requerida",
+            emoji: true
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Aprobador asignado:* <@${payload.aprobadorId}>\n*Ejecutivo:* <@${payload.ejecutivoId}>\n\n*Cliente:* ${payload.cliente}\n*Solicitud:* ${payload.solicitud}\n*Impacto estimado:* ${payload.impacto}\n*Justificación:* ${payload.justificacion}\n*Fecha límite:* ${payload.fechaLimite}`
+          }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "Aprobar",
+                emoji: true
+              },
+              style: "primary",
+              action_id: "btn_aprobar_comercial",
+              value: JSON.stringify(payload)
+            },
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "Rechazar",
+                emoji: true
+              },
+              style: "danger",
+              action_id: "btn_rechazar_comercial",
+              value: JSON.stringify(payload)
+            },
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "Pedir información",
+                emoji: true
+              },
+              action_id: "btn_info_comercial",
+              value: JSON.stringify(payload)
+            }
+          ]
+        }
+      ]
+    });
+
+    // Lógica de escalamiento simulada: Si no hay respuesta en 1 minuto, escalar.
+    const messageTs = result.ts;
+    setTimeout(async () => {
+      try {
+        await app.client.chat.postMessage({
+          channel: canal,
+          thread_ts: messageTs,
+          text: `⚠️ *Atención:* La solicitud de ${payload.cliente} no ha sido respondida en el tiempo definido. Escalando al siguiente nivel...`
+        });
+      } catch (e) {
+        console.error("Error en escalamiento:", e);
+      }
+    }, 60000);
+
+  } catch (error) {
+    console.error("Error publicando aprobación comercial:", error);
+  }
+}
+
+app.command('/simular-aprobacion', async ({ command, ack, respond }) => {
+  await ack();
+  
+  const text = command.text.trim();
+  let aprobadorId = command.user_id; 
+  
+  const userMatch = text.match(/<@([a-zA-Z0-9]+)(\|.+)?>/);
+  if (userMatch) {
+    aprobadorId = userMatch[1];
+  }
+
+  const payloadSimulado = {
+    cliente: "ABC S.A.",
+    solicitud: "Descuento adicional de 8%",
+    impacto: "S/ 12,000",
+    justificacion: "Renovación de contrato",
+    fechaLimite: "Hoy, 4 p.m.",
+    ejecutivoId: command.user_id,
+    aprobadorId: aprobadorId,
+    canalNotificacion: command.channel_id
+  };
+
+  await respond("Generando simulación de aprobación comercial en el canal...");
+  await iniciarAprobacionComercial(payloadSimulado);
+});
+
+app.action(/btn_(aprobar|rechazar|info)_comercial/, async ({ ack, body, action, client, logger }) => {
+  await ack();
+  
+  const actionType = action.action_id.split('_')[1];
+  const payloadStr = action.value;
+  
+  let titulo = "Decisión Comercial";
+  let labelDecision = "Comentario de Decisión";
+  let placeholderDecision = "Deja un comentario sobre tu decisión...";
+  
+  if (actionType === "info") {
+    titulo = "Solicitar Información";
+    labelDecision = "Información Requerida";
+    placeholderDecision = "¿Qué información necesitas del ejecutivo?";
+  }
+
+  try {
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'modal_decision_comercial',
+        private_metadata: JSON.stringify({
+          actionType: actionType,
+          originalPayload: payloadStr,
+          channel: body.channel.id,
+          messageTs: body.message.ts
+        }),
+        title: {
+          type: 'plain_text',
+          text: titulo.substring(0, 24)
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Enviar'
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancelar'
+        },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'bloque_comentario',
+            element: {
+              type: 'plain_text_input',
+              action_id: 'input_comentario',
+              multiline: true,
+              placeholder: {
+                type: 'plain_text',
+                text: placeholderDecision
+              }
+            },
+            label: {
+              type: 'plain_text',
+              text: labelDecision
+            }
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    logger.error("Error abriendo modal comercial:", error);
+  }
+});
+
+app.view('modal_decision_comercial', async ({ ack, body, view, client, logger }) => {
+  await ack();
+
+  try {
+    const meta = JSON.parse(view.private_metadata);
+    const originalPayload = JSON.parse(meta.originalPayload);
+    const comentario = view.state.values.bloque_comentario.input_comentario.value;
+    const actionType = meta.actionType;
+    const userRealizoAccion = body.user.id;
+
+    let estadoTexto = "Aprobado ✅";
+    if (actionType === "rechazar") estadoTexto = "Rechazado ❌";
+    if (actionType === "info") estadoTexto = "Pendiente de Información ⚠️";
+
+    await client.chat.update({
+      channel: meta.channel,
+      ts: meta.messageTs,
+      text: `Solicitud Comercial - ${estadoTexto}`,
+      blocks: [
+        {
+          type: "header",
+          text: {
+            type: "plain_text",
+            text: `Aprobación Comercial: ${estadoTexto}`,
+            emoji: true
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Aprobador asignado:* <@${originalPayload.aprobadorId}>\n*Ejecutivo:* <@${originalPayload.ejecutivoId}>\n\n*Cliente:* ${originalPayload.cliente}\n*Solicitud:* ${originalPayload.solicitud}\n*Impacto:* ${originalPayload.impacto}\n*Justificación:* ${originalPayload.justificacion}\n*Fecha límite:* ${originalPayload.fechaLimite}`
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Decisión tomada por:* <@${userRealizoAccion}>\n*Comentario:*\n> ${comentario}`
+          }
+        }
+      ]
+    });
+
+    await client.chat.postMessage({
+      channel: originalPayload.ejecutivoId,
+      text: `Tu solicitud para ${originalPayload.cliente} ha sido revisada.`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: `Decisión: ${estadoTexto}` }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `El responsable <@${userRealizoAccion}> ha revisado tu solicitud para el cliente *${originalPayload.cliente}*.\n\n*Comentario/Feedback:*\n> ${comentario}`
+          }
+        }
+      ]
+    });
+
+    console.log(`[SALESFORCE SIMULACIÓN] Actualizando registro en Salesforce.`);
+    console.log(`Payload enviado:`, {
+      cliente: originalPayload.cliente,
+      estado: estadoTexto,
+      aprobador: userRealizoAccion,
+      comentario: comentario
+    });
+
+  } catch (error) {
+    logger.error("Error procesando decisión comercial:", error);
+  }
+});
 
 // ==========================================
 // FLUJO PROFESIONAL: SOLICITUD DE APROBACIÓN

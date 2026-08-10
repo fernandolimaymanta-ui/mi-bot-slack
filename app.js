@@ -120,7 +120,7 @@ app.view('modal_crear_tarea', async ({ ack, body, view, client, logger }) => {
 // ... (tu configuración inicial y app.message quedan arriba) ...
 
 // ==========================================
-// FLUJO: APROBACIONES COMERCIALES (SALESFORCE)
+// FLUJO: APROBACIONES QROMA (SALESFORCE)
 // ==========================================
 
 async function iniciarAprobacionComercial(payload) {
@@ -130,13 +130,13 @@ async function iniciarAprobacionComercial(payload) {
   try {
     const result = await app.client.chat.postMessage({
       channel: canal,
-      text: `Nueva Solicitud de Aprobación Comercial: ${payload.cliente}`,
+      text: `Nueva Solicitud de Aprobación QROMA: ${payload.cliente}`,
       blocks: [
         {
           type: "header",
           text: {
             type: "plain_text",
-            text: "Aprobación Comercial Requerida",
+            text: "Aprobación QROMA Requerida",
             emoji: true
           }
         },
@@ -228,7 +228,7 @@ app.command('/simular-aprobacion', async ({ command, ack, respond }) => {
     canalNotificacion: command.channel_id
   };
 
-  await respond("Generando simulación de aprobación comercial en el canal...");
+  await respond("Generando simulación de aprobación QROMA en el canal...");
   await iniciarAprobacionComercial(payloadSimulado);
 });
 
@@ -238,7 +238,7 @@ app.action(/btn_(aprobar|rechazar|info)_comercial/, async ({ ack, body, action, 
   const actionType = action.action_id.split('_')[1];
   const payloadStr = action.value;
   
-  let titulo = "Decisión Comercial";
+  let titulo = "Decisión QROMA";
   let labelDecision = "Comentario de Decisión";
   let placeholderDecision = "Deja un comentario sobre tu decisión...";
   
@@ -315,13 +315,13 @@ app.view('modal_decision_comercial', async ({ ack, body, view, client, logger })
     await client.chat.update({
       channel: meta.channel,
       ts: meta.messageTs,
-      text: `Solicitud Comercial - ${estadoTexto}`,
+      text: `Solicitud QROMA - ${estadoTexto}`,
       blocks: [
         {
           type: "header",
           text: {
             type: "plain_text",
-            text: `Aprobación Comercial: ${estadoTexto}`,
+            text: `Aprobación QROMA: ${estadoTexto}`,
             emoji: true
           }
         },

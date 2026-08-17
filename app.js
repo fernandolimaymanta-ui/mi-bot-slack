@@ -1875,7 +1875,7 @@ async function iniciarCasoShopstar(payload, client) {
                 text: "Ver en Salesforce",
                 emoji: true
               },
-              url: `https://shopstar.my.salesforce.com/_ui/search/ui/UnifiedSearchResults?str=${payload.caso || ''}`,
+              url: `https://kanalia2.lightning.force.com/lightning/o/Case/list?filterName=Recent`,
               action_id: "ver_salesforce",
               value: "url_button"
             },

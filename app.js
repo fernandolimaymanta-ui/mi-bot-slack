@@ -2,6 +2,7 @@ require('dotenv').config();
 const { App } = require('@slack/bolt');
 const axios = require('axios');
 const Tesseract = require('tesseract.js');
+const jsforce = require('jsforce');
 
 // Inicializa la aplicación con tus tokens ocultos
 const app = new App({
@@ -28,7 +29,7 @@ app.message('hola', async ({ message, say }) => {
 const http = require('http');
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
-  if (req.method === 'POST' && req.url === '/webhook/salesforce/aprobacion') {
+  if (req.method === 'POST' && (req.url === '/webhook/salesforce/aprobacion' || req.url === '/webhook/salesforce/shopstar')) {
     let body = '';
     req.on('data', chunk => {
       body += chunk.toString();
@@ -36,8 +37,12 @@ http.createServer((req, res) => {
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body);
-        // Despachar el flujo de aprobación comercial
-        await iniciarAprobacionComercial(payload);
+        if (req.url === '/webhook/salesforce/aprobacion') {
+          // Despachar el flujo de aprobación comercial
+          await iniciarAprobacionComercial(payload);
+        } else if (req.url === '/webhook/salesforce/shopstar') {
+          await iniciarCasoShopstar(payload);
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
       } catch (error) {
@@ -1818,4 +1823,172 @@ app.action('bono_fidelizacion_kam', async ({ body, ack, client, logger }) => {
   } catch (error) {
     logger.error("Error aplicando bono de retención:", error);
   }
+});
+
+// ==========================================
+// FLUJO: SHOPSTAR OPS CONNECTOR (SALESFORCE)
+// ==========================================
+
+async function iniciarCasoShopstar(payload, client) {
+  // payload esperado: { caso: "CS-10293", cliente: "Juan Pérez", canal: "Web Shopstar", prioridad: "Alta", problema: "Pedido no entregado a tiempo", canalSlack: "#soporte-shopstar" }
+  const canal = payload.canalSlack || '#soporte-shopstar'; // Puede ser ID o el nombre del canal
+  
+  try {
+    const chatClient = client || app.client;
+    await chatClient.chat.postMessage({
+      channel: canal,
+      text: `🚨 Nuevo Caso Crítico en Salesforce: ${payload.caso}`,
+      blocks: [
+        {
+          type: "header",
+          text: {
+            type: "plain_text",
+            text: "🚨 Nuevo Caso Crítico en Salesforce",
+            emoji: true
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Caso:* ${payload.caso || 'N/A'}\n*Cliente:* ${payload.cliente || 'N/A'}\n*Canal:* ${payload.canal || 'N/A'}\n*Prioridad:* ${payload.prioridad || 'Alta'}\n*Problema:* ${payload.problema || 'N/A'}`
+          }
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "Asignármelo",
+                emoji: true
+              },
+              style: "primary",
+              action_id: "asignar_caso",
+              value: payload.caso || "CS-UNKNOWN"
+            },
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "Ver en Salesforce",
+                emoji: true
+              },
+              url: `https://shopstar.my.salesforce.com/_ui/search/ui/UnifiedSearchResults?str=${payload.caso || ''}`,
+              action_id: "ver_salesforce",
+              value: "url_button"
+            },
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "Consultar con Logística",
+                emoji: true
+              },
+              style: "danger",
+              action_id: "solicitar_logistica",
+              value: payload.caso || "CS-UNKNOWN"
+            }
+          ]
+        }
+      ]
+    });
+  } catch (error) {
+    console.error("Error enviando caso Shopstar:", error);
+  }
+}
+
+async function actualizarCasoEnSalesforce(numeroCaso, slackUserId) {
+  const conn = new jsforce.Connection({
+    loginUrl: process.env.SF_LOGIN_URL || 'https://login.salesforce.com'
+  });
+  
+  try {
+    if (!process.env.SF_USERNAME || !process.env.SF_PASSWORD_AND_TOKEN) {
+      console.warn("Faltan credenciales de Salesforce en el .env, omitiendo actualización de API");
+      return;
+    }
+    
+    await conn.login(process.env.SF_USERNAME, process.env.SF_PASSWORD_AND_TOKEN);
+    
+    // Buscamos el ID interno del Caso basado en el Número de Caso (CS-10293)
+    const sfCase = await conn.query(`SELECT Id FROM Case WHERE CaseNumber = '${numeroCaso}'`);
+    
+    // Actualizamos el estado del Caso
+    if (sfCase.records.length > 0) {
+      await conn.sobject("Case").update({
+        Id: sfCase.records[0].Id,
+        Status: "Working"
+      });
+      console.log(`Caso ${numeroCaso} actualizado exitosamente en Salesforce a "Working"`);
+    }
+  } catch (error) {
+    console.error("Error al conectar con Salesforce API:", error);
+  }
+}
+
+app.action('asignar_caso', async ({ body, ack, client, logger }) => {
+  await ack();
+  
+  const numCaso = body.actions[0].value;
+  const usuarioId = body.user.id;
+
+  try {
+    // 1. Aquí ejecutamos la actualización real en Salesforce
+    await actualizarCasoEnSalesforce(numCaso, usuarioId);
+
+    // 2. Actualizar el mensaje original en Slack
+    const blocksOriginales = [...body.message.blocks];
+    
+    // Reemplazamos los botones con un mensaje de "Atendido"
+    blocksOriginales[2] = {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `✅ *Caso ${numCaso}* asignado y en atención por <@${usuarioId}>`
+      }
+    };
+
+    await client.chat.update({
+      channel: body.channel.id,
+      ts: body.message.ts,
+      text: `Caso ${numCaso} atendido por <@${usuarioId}>`,
+      blocks: blocksOriginales
+    });
+  } catch (error) {
+    logger.error("Error asignando caso Shopstar:", error);
+  }
+});
+
+app.action('solicitar_logistica', async ({ body, ack, client, logger }) => {
+  await ack();
+  
+  const numCaso = body.actions[0].value;
+  const usuarioId = body.user.id;
+
+  try {
+    const blocksOriginales = [...body.message.blocks];
+    
+    blocksOriginales[2] = {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `⚠️ <@${usuarioId}> ha escalado el *Caso ${numCaso}* a Logística.`
+      }
+    };
+
+    await client.chat.update({
+      channel: body.channel.id,
+      ts: body.message.ts,
+      text: `Caso ${numCaso} escalado a Logística`,
+      blocks: blocksOriginales
+    });
+  } catch (error) {
+    logger.error("Error solicitando a logística:", error);
+  }
+});
+
+app.action('ver_salesforce', async ({ ack }) => {
+  await ack();
 });

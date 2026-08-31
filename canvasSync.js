@@ -3,6 +3,8 @@ const cheerio = require('cheerio');
 const axios = require('axios');
 const fs = require('fs');
 
+const path = require('path');
+
 const sheetMapping = {
   "Detalle del Gasto": "Detalle de Gastos",
   "Resumen por Socio": "Resumen por Socio",
@@ -12,8 +14,16 @@ const sheetMapping = {
 };
 
 async function getGoogleSheetsClient() {
-  const token = JSON.parse(fs.readFileSync('token.json'));
-  const credentials = JSON.parse(fs.readFileSync('oauth-credentials.json'));
+  let token, credentials;
+  
+  if (process.env.GOOGLE_OAUTH_CREDENTIALS && process.env.GOOGLE_TOKEN) {
+    credentials = JSON.parse(process.env.GOOGLE_OAUTH_CREDENTIALS);
+    token = JSON.parse(process.env.GOOGLE_TOKEN);
+  } else {
+    token = JSON.parse(fs.readFileSync(path.join(__dirname, 'token.json')));
+    credentials = JSON.parse(fs.readFileSync(path.join(__dirname, 'oauth-credentials.json')));
+  }
+
   const {client_secret, client_id, redirect_uris} = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
   oAuth2Client.setCredentials(token);

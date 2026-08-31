@@ -3,7 +3,7 @@ const { App } = require('@slack/bolt');
 const axios = require('axios');
 const Tesseract = require('tesseract.js');
 const jsforce = require('jsforce');
-
+const { syncCanvasToSheets } = require('./canvasSync');
 // Inicializa la aplicación con tus tokens ocultos
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -1991,4 +1991,21 @@ app.action('solicitar_logistica', async ({ body, ack, client, logger }) => {
 
 app.action('ver_salesforce', async ({ ack }) => {
   await ack();
+});
+
+// ==========================================
+// COMANDO: SINCRONIZAR CANVAS A GOOGLE SHEETS
+// ==========================================
+app.command('/sincronizar-gastos', async ({ command, ack, respond }) => {
+  await ack();
+  await respond("🔄 Iniciando sincronización de tu Canvas con Google Sheets. Esto puede tomar unos segundos...");
+  try {
+    const canvasId = "F0BD1FFG8TX"; // ID obtenido
+    const spreadsheetId = "1lUKkiW-8vGLswydqOiIN3F_dxhWJTwWj"; // ID obtenido
+    await syncCanvasToSheets(app, canvasId, spreadsheetId);
+    await respond("✅ ¡Sincronización completada exitosamente! Todas las pestañas de tu archivo de Google Sheets han sido actualizadas.");
+  } catch (err) {
+    console.error(err);
+    await respond(`❌ Ocurrió un error al intentar sincronizar: ${err.message}`);
+  }
 });
